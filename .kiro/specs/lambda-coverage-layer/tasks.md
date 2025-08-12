@@ -112,7 +112,7 @@
   - Add validation scripts to verify layer package integrity
   - _Requirements: 3.1, 3.2, 3.3_
 
-- [-] 9. Create example Lambda functions and documentation
+- [x] 9. Create example Lambda functions and documentation
 - [x] 9.1 Implement example Lambda functions demonstrating layer usage
 
   - Create simple Lambda function using @coverage_handler decorator
@@ -121,7 +121,7 @@
   - Create coverage combiner Lambda function example
   - _Requirements: 1.1, 1.2, 2.1, 4.1_
 
-- [-] 9.2 Create comprehensive usage documentation and examples
+- [x] 9.2 Create comprehensive usage documentation and examples
 
   - Write README with installation and usage instructions
   - Create API documentation for all public functions and classes
