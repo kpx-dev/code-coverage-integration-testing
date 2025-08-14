@@ -2,8 +2,7 @@
 Lambda function example with health check endpoint using coverage layer
 """
 import json
-from coverage_wrapper import coverage_handler
-from coverage_wrapper.health_check import health_check_handler
+from coverage_wrapper import coverage_handler, health_check_handler
 
 
 @coverage_handler

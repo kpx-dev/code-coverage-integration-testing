@@ -5,6 +5,7 @@ This module provides decorators and context managers for automatic coverage trac
 """
 
 import os
+import time
 from typing import Optional
 import coverage
 from .models import CoverageConfig
@@ -85,6 +86,7 @@ def initialize_coverage() -> Optional[coverage.Coverage]:
         coverage_config = {
             'branch': config.branch_coverage,
             'source': ['.'],  # Track coverage for current directory
+            'data_file': '/tmp/.coverage',  # Use writable /tmp directory for coverage data file
         }
         
         # Add include patterns if specified

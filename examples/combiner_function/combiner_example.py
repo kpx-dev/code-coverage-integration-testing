@@ -4,8 +4,7 @@ Lambda function example for combining coverage files using the coverage layer
 import json
 import os
 from datetime import datetime
-from coverage_wrapper import coverage_handler
-from coverage_wrapper.combiner import combine_coverage_files
+from coverage_wrapper import coverage_handler, combine_coverage_files
 
 
 @coverage_handler

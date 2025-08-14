@@ -16,35 +16,86 @@ The Lambda Coverage Layer provides a seamless way to collect code coverage data 
 
 ```mermaid
 graph TB
-    subgraph "Lambda Function Execution"
-        A[Lambda Handler] --> B[Coverage Wrapper]
+    subgraph "Lambda Function Execution Environment"
+        A[Lambda Handler] --> B[Coverage Wrapper @coverage_handler]
         B --> C[Coverage.py Library]
         B --> D[Your Business Logic]
         C --> E[Coverage Data Collection]
+        E --> F["/tmp/.coverage data file"]
     end
 
     subgraph "Data Processing & Storage"
-        E --> F[Coverage File Generation]
-        F --> G[S3 Uploader]
-        G --> H[S3 Bucket Storage]
+        F --> G[Coverage JSON Generation]
+        G --> H[S3 Uploader with Retry Logic]
+        H --> I[S3 Bucket Storage]
+        I --> J[Organized by Function/Date]
     end
 
     subgraph "Reporting & Analysis"
-        H --> I[Coverage Combiner Lambda]
-        I --> J[Merged Coverage Reports]
-        J --> K[Combined S3 Storage]
-
-        L[Health Check Endpoint] --> M[Coverage Status API]
+        I --> K[Coverage Combiner Lambda]
+        K --> L[Merged Coverage Reports]
+        L --> M[Combined S3 Storage]
+        
+        N[Health Check Endpoints] --> O[Coverage Status API]
+        N --> P[Performance Metrics]
     end
 
     subgraph "Monitoring & Observability"
-        N[CloudWatch Logs] --> O[Structured JSON Logs]
-        P[Error Handling] --> Q[Graceful Degradation]
+        Q[CloudWatch Logs] --> R[Structured JSON Logs]
+        S[Error Handling] --> T[Graceful Degradation]
+        U[Performance Tracking] --> V[Timing Metrics]
     end
 
-    B --> N
-    G --> P
-    I --> N
+    subgraph "Layer Architecture"
+        W[Lambda Layer v13+] --> X[coverage.py 7.10.3]
+        W --> Y[Custom Wrapper Modules]
+        W --> Z[S3 Upload Components]
+    end
+
+    B --> Q
+    H --> S
+    K --> Q
+    B --> U
+    W --> B
+    
+    style F fill:#e1f5fe
+    style I fill:#e8f5e8
+    style Q fill:#fff3e0
+    style W fill:#f3e5f5
+```
+
+### Execution Flow
+
+```mermaid
+sequenceDiagram
+    participant LF as Lambda Function
+    participant CW as Coverage Wrapper
+    participant CP as Coverage.py
+    participant BL as Business Logic
+    participant S3 as S3 Storage
+    participant CL as CloudWatch Logs
+
+    Note over LF,CL: Lambda Function Execution
+    LF->>CW: Function invocation
+    CW->>CP: Initialize coverage tracking
+    CW->>CP: Configure data_file='/tmp/.coverage'
+    CW->>BL: Execute business logic
+    BL-->>CW: Return results
+    CW->>CP: Stop coverage & generate report
+    CP-->>CW: Coverage data file (/tmp/.coverage)
+
+    Note over CW,S3: Async Upload Process
+    CW->>CW: Generate JSON from coverage data
+    CW->>S3: Upload coverage file with retry logic
+    S3-->>CW: Upload confirmation
+    CW->>CL: Log performance metrics & status
+    CW-->>LF: Return business logic results
+
+    Note over S3,CL: Optional Combining Process
+    S3->>CW: Trigger combiner Lambda
+    CW->>S3: Download multiple coverage files
+    CW->>CP: Merge coverage data
+    CW->>S3: Upload combined report
 ```
 
 ### Solution Components
@@ -74,69 +125,6 @@ graph TB
 - **Scheduled Processing**: Can be triggered by CloudWatch Events or S3 events
 - **Data Validation**: Ensures coverage file integrity before merging
 
-#### 5. **Health & Monitoring**
-
-- **Health Endpoints**: Built-in health check API for coverage status
-- **Structured Logging**: JSON logs for easy parsing and monitoring
-- **Error Handling**: Graceful degradation ensures Lambda functions continue working
-
-### Execution Flow
-
-```mermaid
-sequenceDiagram
-    participant LF as Lambda Function
-    participant CW as Coverage Wrapper
-    participant CP as Coverage.py
-    participant BL as Business Logic
-    participant S3 as S3 Storage
-    participant CL as CloudWatch Logs
-
-    Note over LF,CL: Lambda Function Execution
-    LF->>CW: Function invocation
-    CW->>CP: Initialize coverage tracking
-    CW->>BL: Execute business logic
-    BL-->>CW: Return results
-    CW->>CP: Stop coverage & generate report
-    CP-->>CW: Coverage data file
-
-    Note over CW,S3: Async Upload Process
-    CW->>S3: Upload coverage file
-    S3-->>CW: Upload confirmation
-    CW->>CL: Log metrics & status
-    CW-->>LF: Return business logic results
-
-    Note over S3,CL: Optional Combining Process
-    S3->>CW: Trigger combiner Lambda
-    CW->>S3: Download multiple coverage files
-    CW->>CP: Merge coverage data
-    CW->>S3: Upload combined report
-```
-
-### Key Benefits
-
-1. **Zero Code Changes**: Add coverage to existing Lambda functions without modifying business logic
-2. **Performance Optimized**: Minimal cold start impact (~200-500ms) with async upload
-3. **Fault Tolerant**: Functions continue working even if coverage collection fails
-4. **Scalable**: Works across hundreds of Lambda functions with centralized storage
-5. **Observable**: Rich logging and health check endpoints for monitoring
-
-### Layer Structure
-
-```
-layer/
-├── python/
-│   └── coverage_wrapper/      # Custom wrapper modules
-│       ├── __init__.py        # Public API exports
-│       ├── wrapper.py         # Main coverage wrapper & decorators
-│       ├── s3_uploader.py     # S3 upload with retry logic
-│       ├── health_check.py    # Health check endpoints
-│       ├── combiner.py        # Coverage file combining utilities
-│       ├── models.py          # Data models & configuration
-│       ├── logging_utils.py   # Structured logging
-│       └── error_handling.py  # Graceful error handling
-└── requirements.txt           # Layer dependencies (coverage.py, boto3)
-```
-
 ### Data Flow Patterns
 
 #### Pattern 1: Automatic Coverage (Decorator)
@@ -158,16 +146,6 @@ def lambda_handler(event, context):
 
     cleanup_resources()  # Not tracked
     return result
-```
-
-#### Pattern 3: Health Check Integration
-
-```python
-@coverage_handler
-def lambda_handler(event, context):
-    if event.get('path') == '/health':
-        return health_check_handler()  # Built-in health endpoint
-    return handle_business_request(event)
 ```
 
 ## Quick Start
@@ -259,179 +237,455 @@ aws s3 ls s3://your-coverage-bucket/coverage/
 aws logs tail /aws/lambda/my-function --follow
 ```
 
-## Installation & Deployment Scenarios
+## Deployment Guide
 
-### Prerequisites
+### Step-by-Step Deployment Instructions
 
-- Python 3.8+
-- AWS CLI configured with appropriate permissions
-- AWS CDK v2 (for infrastructure deployment)
-- Make (for build automation)
+#### Step 1: Prerequisites Setup
 
-### Scenario 1: Complete Infrastructure Setup (Recommended)
-
-For new projects or when you want the full solution including S3 bucket and example functions:
+Ensure you have the required tools and permissions:
 
 ```bash
-# Clone and setup
+# Verify AWS CLI is configured
+aws sts get-caller-identity
+
+# Check Python version (3.8+ required)
+python3 --version
+
+# Install AWS CDK v2 (if not already installed)
+npm install -g aws-cdk
+
+# Verify CDK installation
+cdk --version
+```
+
+#### Step 2: Clone and Build the Layer
+
+```bash
+# Clone the repository
 git clone <repository-url>
 cd lambda-coverage-layer
-make dev-setup
 
-# Deploy everything: S3 bucket, layer, IAM roles, example functions
-make cdk-deploy
-```
-
-**What this creates:**
-
-- Lambda layer with coverage capabilities
-- S3 bucket with lifecycle policies for coverage storage
-- IAM execution role with proper S3 permissions
-- Example Lambda functions demonstrating usage patterns
-- CloudWatch log groups for monitoring
-
-### Scenario 2: Layer-Only Deployment
-
-When you have existing infrastructure and only need the layer:
-
-```bash
-# Build and deploy just the layer
-make build
-make deploy
-```
-
-**What this creates:**
-
-- Lambda layer deployed to us-east-1 region
-- Layer versions for different Python runtimes
-
-### Scenario 3: Development/Testing Setup
-
-For local development and testing:
-
-```bash
-# Setup development environment
-make dev-setup
-
-# Run tests
-make test
-
-# Build and validate locally
-make dev-build
-```
-
-### Scenario 4: CI/CD Pipeline Integration
-
-For automated deployments in CI/CD:
-
-```bash
-# In your CI/CD pipeline
+# Install development dependencies
 make install-deps
-make build
-make validate
 
-# Deploy to different environments
-make deploy  # Deploys to us-east-1
-make cdk-deploy --context environment=staging
+# Build the Lambda layer package
+make build
+
+# Validate the built layer
+make validate
 ```
 
-### Multi-Region Deployment
+#### Step 3: Deploy Infrastructure
 
-For global applications requiring the layer in multiple regions, you'll need to deploy manually to each region or use CDK:
+Choose one of the following deployment options:
+
+##### Option A: Complete Infrastructure (Recommended for Testing)
+
+Deploy everything including S3 bucket, layer, and example functions:
 
 ```bash
-# Deploy layer to us-east-1 (default)
+# Deploy complete infrastructure
+make cdk-deploy
+
+# This creates:
+# - Lambda layer (lambda-coverage-layer)
+# - S3 bucket for coverage storage
+# - Example Lambda functions with coverage enabled
+# - IAM roles with proper permissions
+```
+
+##### Option B: Layer-Only Deployment
+
+Deploy just the layer to use with existing infrastructure:
+
+```bash
+# Deploy only the layer to us-east-1
 make deploy
 
-# For other regions, use AWS CLI directly
+# For other regions, specify the region:
 aws lambda publish-layer-version \
   --layer-name lambda-coverage-layer \
   --zip-file fileb://dist/lambda-coverage-layer-latest.zip \
   --compatible-runtimes python3.8 python3.9 python3.10 python3.11 python3.12 \
   --region us-west-2
-
-# Or use CDK for multi-region infrastructure
-cdk deploy --context regions="us-east-1,eu-west-1"
 ```
 
-## Usage Patterns & Use Cases
+#### Step 4: Get Layer ARN
 
-### When to Use This Solution
+After deployment, get the layer ARN for use in your functions:
 
-#### ✅ **Ideal Use Cases**
-
-- **Microservices Architecture**: Track coverage across multiple Lambda functions
-- **CI/CD Quality Gates**: Ensure code coverage thresholds in deployment pipelines
-- **Production Monitoring**: Monitor which code paths are actually used in production
-- **Testing Gap Analysis**: Identify untested code in serverless applications
-- **Compliance Requirements**: Meet code coverage requirements for regulated industries
-- **Performance Optimization**: Identify unused code for optimization
-
-#### ❌ **Not Recommended For**
-
-- **High-frequency functions** (>1000 invocations/minute) - consider sampling
-- **Memory-constrained functions** (<256MB) - coverage adds ~30-70MB overhead
-- **Ultra-low latency requirements** (<100ms) - adds 50-500ms cold start time
-- **Functions with sensitive data** - ensure proper S3 bucket security
-
-### Usage Patterns
-
-### Basic Usage with Decorator
-
-The simplest way to add coverage tracking to your Lambda function:
-
-```python
-from coverage_wrapper import coverage_handler
-
-@coverage_handler
-def lambda_handler(event, context):
-    # All your code is automatically tracked
-    name = event.get('name', 'World')
-    return {
-        'statusCode': 200,
-        'body': f'Hello, {name}!'
-    }
+```bash
+# Get the latest layer version ARN
+aws lambda list-layer-versions \
+  --layer-name lambda-coverage-layer \
+  --region us-east-1 \
+  --query 'LayerVersions[0].LayerVersionArn' \
+  --output text
 ```
 
-### Manual Control with Context Manager
+#### Step 5: Configure Your Lambda Functions
 
-For fine-grained control over what code is tracked:
+Add the layer to your existing Lambda functions:
 
-```python
-from coverage_wrapper import CoverageContext
+```bash
+# Using AWS CLI
+aws lambda update-function-configuration \
+  --function-name your-function-name \
+  --layers arn:aws:lambda:us-east-1:ACCOUNT:layer:lambda-coverage-layer:VERSION
 
-def lambda_handler(event, context):
-    # Initialization code (not tracked)
-    setup_resources()
-
-    # Business logic (tracked)
-    with CoverageContext():
-        result = process_business_logic(event)
-
-    # Cleanup code (not tracked)
-    cleanup_resources()
-
-    return result
+# Set required environment variables
+aws lambda update-function-configuration \
+  --function-name your-function-name \
+  --environment Variables='{
+    "COVERAGE_S3_BUCKET":"your-coverage-bucket",
+    "COVERAGE_S3_PREFIX":"coverage/",
+    "COVERAGE_LOG_LEVEL":"INFO"
+  }'
 ```
 
-### Health Check Integration
+## Quick Reference
 
-Add health check endpoints to your Lambda functions:
+### Essential Make Commands
 
-```python
-from coverage_wrapper import coverage_handler
-from coverage_wrapper.health_check import health_check_handler
+```bash
+# Setup and Build
+make help           # Show all available commands
+make install-deps   # Install development dependencies
+make build          # Build the Lambda layer package
+make validate       # Validate the built layer package
 
-@coverage_handler
-def lambda_handler(event, context):
-    if event.get('path') == '/health':
-        return {
-            'statusCode': 200,
-            'body': json.dumps(health_check_handler())
-        }
+# Deployment
+make deploy         # Deploy layer to AWS (us-east-1 only)
+make cdk-deploy     # Deploy complete infrastructure (S3, layer, examples)
+make cdk-destroy    # Destroy CDK infrastructure
 
-    # Regular business logic
-    return handle_request(event, context)
+# Testing and Load Testing
+make test           # Run unit tests
+make load-test      # Run standard load test (2 iterations, 3 workers)
+make load-test-quick # Run quick load test (1 iteration, 2 workers)
+make load-test-full # Run comprehensive load test (5 iterations, 5 workers)
+make test-status    # Show testing infrastructure status
+
+# Development
+make clean          # Clean build artifacts
+make dev-build      # Clean, build, and validate
+make version        # Show current version
+```
+
+### Key Environment Variables
+
+```bash
+# Required for Lambda functions using the layer
+COVERAGE_S3_BUCKET=your-coverage-bucket-name
+COVERAGE_S3_PREFIX=coverage/
+COVERAGE_LOG_LEVEL=INFO
+
+# Optional configuration
+COVERAGE_UPLOAD_TIMEOUT=30
+COVERAGE_BRANCH_COVERAGE=true
+COVERAGE_INCLUDE_PATTERNS=src/*,lib/*
+COVERAGE_EXCLUDE_PATTERNS=tests/*,vendor/*
+```
+
+### Function Names After CDK Deployment
+
+After running `make cdk-deploy`, you'll get these example functions:
+
+```bash
+# Simple coverage example
+LambdaCoverageLayerStack-SimpleCoverageExample13DE-JBHKwSZvKw9C
+
+# Health check example  
+LambdaCoverageLayerStack-HealthCheckExample60A2B0E-YLBpgA2a1glR
+
+# Coverage combiner function
+LambdaCoverageLayerStack-CoverageCombiner1F4D726E-9QDrjAFUmYAh
+
+# S3 bucket name
+lambdacoveragelayerstack-coveragebucket38435783-xnf0eqfoisay
+```
+
+### Quick Test Commands
+
+```bash
+# Test simple function
+aws lambda invoke \
+  --function-name "LambdaCoverageLayerStack-SimpleCoverageExample13DE-JBHKwSZvKw9C" \
+  --payload "$(echo '{"name": "TestUser"}' | base64)" \
+  --region us-east-1 response.json
+
+# Check S3 for coverage files
+aws s3 ls s3://lambdacoveragelayerstack-coveragebucket38435783-xnf0eqfoisay/coverage/ --recursive
+
+# View recent logs
+aws logs tail /aws/lambda/LambdaCoverageLayerStack-SimpleCoverageExample13DE-JBHKwSZvKw9C --since 10m
+```
+
+## Real-World Deployment Example
+
+Here's a complete walkthrough using the actual function names and resources created by the CDK deployment:
+
+### Step 1: Deploy the Infrastructure
+
+```bash
+# Clone and build
+git clone <repository-url>
+cd lambda-coverage-layer
+make install-deps
+make build
+
+# Deploy complete infrastructure
+make cdk-deploy
+```
+
+### Step 2: Test the Deployed Functions
+
+After deployment, test the example functions that were created:
+
+```bash
+# Test the simple coverage function
+aws lambda invoke \
+  --function-name "LambdaCoverageLayerStack-SimpleCoverageExample13DE-JBHKwSZvKw9C" \
+  --payload "$(echo '{"name": "ProductionTest"}' | base64)" \
+  --region us-east-1 \
+  simple_response.json
+
+# Test the health check function
+aws lambda invoke \
+  --function-name "LambdaCoverageLayerStack-HealthCheckExample60A2B0E-YLBpgA2a1glR" \
+  --payload "$(echo '{"path": "/health"}' | base64)" \
+  --region us-east-1 \
+  health_response.json
+
+# View the responses
+echo "Simple function response:"
+cat simple_response.json | jq '.'
+
+echo "Health check response:"
+cat health_response.json | jq '.'
+```
+
+### Step 3: Verify Coverage Files in S3
+
+```bash
+# List all coverage files in the deployed S3 bucket
+aws s3 ls s3://lambdacoveragelayerstack-coveragebucket38435783-xnf0eqfoisay/coverage/ --recursive --human-readable
+
+# Download and examine a coverage file
+LATEST_FILE=$(aws s3 ls s3://lambdacoveragelayerstack-coveragebucket38435783-xnf0eqfoisay/coverage/ --recursive | sort | tail -1 | awk '{print $4}')
+aws s3 cp s3://lambdacoveragelayerstack-coveragebucket38435783-xnf0eqfoisay/$LATEST_FILE /tmp/example_coverage.json
+
+# View coverage summary
+echo "Coverage file content:"
+cat /tmp/example_coverage.json | jq '.files | to_entries[] | {
+  file: .key,
+  covered_lines: .value.summary.covered_lines,
+  total_statements: .value.summary.num_statements,
+  coverage_percent: .value.summary.percent_covered_display
+}'
+```
+
+### Step 4: Monitor Performance
+
+```bash
+# Check CloudWatch logs for performance metrics
+aws logs tail /aws/lambda/LambdaCoverageLayerStack-SimpleCoverageExample13DE-JBHKwSZvKw9C --since 5m | \
+  grep -E "(Performance|coverage|S3)"
+
+# Get the layer ARN for use in your own functions
+aws lambda list-layer-versions \
+  --layer-name lambda-coverage-layer \
+  --region us-east-1 \
+  --query 'LayerVersions[0].LayerVersionArn' \
+  --output text
+```
+
+### Step 5: Add to Your Own Functions
+
+```bash
+# Get the layer ARN from the deployment
+LAYER_ARN=$(aws lambda list-layer-versions \
+  --layer-name lambda-coverage-layer \
+  --region us-east-1 \
+  --query 'LayerVersions[0].LayerVersionArn' \
+  --output text)
+
+echo "Layer ARN: $LAYER_ARN"
+
+# Add the layer to your existing function
+aws lambda update-function-configuration \
+  --function-name your-existing-function \
+  --layers "$LAYER_ARN"
+
+# Set the required environment variables
+aws lambda update-function-configuration \
+  --function-name your-existing-function \
+  --environment Variables='{
+    "COVERAGE_S3_BUCKET":"lambdacoveragelayerstack-coveragebucket38435783-xnf0eqfoisay",
+    "COVERAGE_S3_PREFIX":"coverage/your-function/",
+    "COVERAGE_LOG_LEVEL":"INFO"
+  }'
+```
+
+### Expected Results
+
+After following these steps, you should see:
+
+- **Coverage files in S3**: Files with names like `20250814_203939_635_2025_08_14___LATEST_*.coverage`
+- **File sizes**: ~2KB for simple functions, ~4KB for more complex functions
+- **Performance impact**: 200-500ms additional execution time for coverage processing
+- **CloudWatch logs**: Structured JSON logs showing coverage operations and S3 uploads
+
+## Load Testing and Verification
+
+### Running Load Tests
+
+The project includes comprehensive load testing capabilities to verify coverage collection:
+
+#### Step 1: Deploy Test Infrastructure
+
+```bash
+# Deploy test functions and infrastructure
+make cdk-deploy
+
+# Verify deployment status
+make test-status
+```
+
+#### Step 2: Run Load Tests
+
+```bash
+# Quick load test (1 iteration, 2 workers)
+make load-test-quick
+
+# Standard load test (2 iterations, 3 workers)
+make load-test
+
+# Comprehensive load test (5 iterations, 5 workers)
+make load-test-full
+
+# Custom load test
+python3 load_test.py \
+  --functions "function1,function2,function3" \
+  --bucket "your-coverage-bucket" \
+  --iterations 3 \
+  --workers 2
+```
+
+#### Step 3: Manual Function Testing
+
+Test individual functions to generate coverage files:
+
+```bash
+# Test simple coverage function
+aws lambda invoke \
+  --function-name "LambdaCoverageLayerStack-SimpleCoverageExample13DE-JBHKwSZvKw9C" \
+  --payload "$(echo '{"name": "TestUser"}' | base64)" \
+  --region us-east-1 \
+  response.json
+
+# Test health check function
+aws lambda invoke \
+  --function-name "LambdaCoverageLayerStack-HealthCheckExample60A2B0E-YLBpgA2a1glR" \
+  --payload "$(echo '{"path": "/health"}' | base64)" \
+  --region us-east-1 \
+  health_response.json
+```
+
+### Coverage Verification
+
+#### Step 1: Check S3 Coverage Files
+
+Verify that coverage files are being generated and uploaded:
+
+```bash
+# List all coverage files
+aws s3 ls s3://your-coverage-bucket/coverage/ --recursive --human-readable
+
+# Check recent coverage files (last 10 minutes)
+aws s3 ls s3://your-coverage-bucket/coverage/ --recursive | \
+  awk '$1" "$2 > "'$(date -u -d '10 minutes ago' '+%Y-%m-%d %H:%M')'"'
+
+# Download and examine a coverage file
+aws s3 cp s3://your-coverage-bucket/coverage/path/to/file.coverage /tmp/coverage.json
+cat /tmp/coverage.json | jq '.'
+```
+
+#### Step 2: Monitor CloudWatch Logs
+
+Check Lambda execution logs for coverage operations:
+
+```bash
+# View recent logs with coverage information
+aws logs tail /aws/lambda/your-function-name --since 10m --region us-east-1 | \
+  grep -E "(coverage|S3|upload|Performance)"
+
+# Filter for coverage-specific log entries
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/your-function-name \
+  --filter-pattern "coverage" \
+  --start-time $(date -d '1 hour ago' +%s)000 \
+  --region us-east-1
+```
+
+#### Step 3: Verify Coverage Data Quality
+
+Examine coverage file content to ensure data quality:
+
+```bash
+# Download a recent coverage file
+LATEST_FILE=$(aws s3 ls s3://your-coverage-bucket/coverage/ --recursive | \
+  sort | tail -1 | awk '{print $4}')
+
+aws s3 cp s3://your-coverage-bucket/$LATEST_FILE /tmp/latest_coverage.json
+
+# Check coverage file structure and content
+echo "File size: $(ls -lh /tmp/latest_coverage.json | awk '{print $5}')"
+echo "Coverage summary:"
+cat /tmp/latest_coverage.json | jq '.files | to_entries[] | {
+  file: .key,
+  covered_lines: .value.summary.covered_lines,
+  total_statements: .value.summary.num_statements,
+  coverage_percent: .value.summary.percent_covered_display
+}'
+```
+
+### Performance Monitoring
+
+#### Expected Performance Metrics
+
+Monitor these key performance indicators:
+
+```bash
+# Coverage initialization time: ~50-150ms
+# Coverage finalization time: ~60-120ms  
+# S3 upload time: ~200-500ms (varies by network)
+# Total overhead: ~300-800ms per invocation
+# Memory overhead: ~30-70MB
+```
+
+#### Performance Verification Script
+
+```bash
+#!/bin/bash
+# performance_check.sh - Monitor coverage performance
+
+FUNCTION_NAME="your-function-name"
+LOG_GROUP="/aws/lambda/$FUNCTION_NAME"
+
+echo "Checking performance metrics for $FUNCTION_NAME..."
+
+# Get recent performance logs
+aws logs filter-log-events \
+  --log-group-name "$LOG_GROUP" \
+  --filter-pattern "Performance" \
+  --start-time $(date -d '1 hour ago' +%s)000 \
+  --region us-east-1 \
+  --query 'events[].message' \
+  --output text | \
+  grep -E "(coverage_initialization|coverage_finalization|s3_upload)" | \
+  jq -r '. | "\(.operation): \(.duration_ms)ms"'
 ```
 
 ### Coverage Combining
@@ -439,8 +693,9 @@ def lambda_handler(event, context):
 Combine multiple coverage files into consolidated reports:
 
 ```python
-from coverage_wrapper import coverage_handler
-from coverage_wrapper.combiner import combine_coverage_files
+from coverage_wrapper import coverage_handler, combine_coverage_files
+import os
+import json
 
 @coverage_handler
 def coverage_combiner_handler(event, context):
@@ -597,7 +852,7 @@ with CoverageContext():
 Returns health status including coverage information.
 
 ```python
-from coverage_wrapper.health_check import health_check_handler
+from coverage_wrapper import health_check_handler
 
 status = health_check_handler()
 # Returns: {"status": "healthy", "coverage_enabled": true, ...}
@@ -608,7 +863,7 @@ status = health_check_handler()
 Combines multiple coverage files into a single report.
 
 ```python
-from coverage_wrapper.combiner import combine_coverage_files
+from coverage_wrapper import combine_coverage_files
 
 result = combine_coverage_files(
     bucket_name="my-bucket",

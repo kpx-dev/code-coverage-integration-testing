@@ -5,8 +5,7 @@ import json
 import os
 import time
 from typing import Dict, Any, Optional
-from coverage_wrapper import coverage_handler, CoverageContext
-from coverage_wrapper.health_check import health_check_handler, get_coverage_status
+from coverage_wrapper import coverage_handler, CoverageContext, health_check_handler, get_coverage_status
 
 
 @coverage_handler
